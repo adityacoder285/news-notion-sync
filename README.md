@@ -15,132 +15,84 @@ It runs out-of-the-box on the **free tier** — no paid features are required.
 - 🧷 **De-duplicates** by article URL so re-runs don't create duplicate rows.
 - 📄 Auto-creates a **per-category page** with a metadata callout and a linked list
   of the day's articles.
-- 🛟 Free-tier safe: gracefully handles invalid keys (401), rate limits (429),
+- 🛠️ Free-tier safe: gracefully handles invalid keys (401), rate limits (429),
   paid-only parameters (403/422), and empty results.
+- ⏰ Ships with a GitHub Actions workflow so the sync runs itself every morning.
 
 ## How it works
 
-For each configured category the script:
+For each configured category the script
 
-1. fetches the latest news from newsdata.io (following the `nextPage` token),
-2. inserts de-duplicated rows into your Notion database, then
-3. creates a per-category Notion page with a metadata callout.
+1. calls `GET https://newsdata.io/api/1/news` with free-tier-safe parameters
+   (`apikey`, `category`, `language`, optional `country`), following `nextPage`
+   until `MAX_ARTICLES` results are collected,
+2. inserts the articles as rows in the Notion database, skipping any article URL
+   that is already present, and
+3. creates a per-category Notion page containing a metadata callout (category,
+   sync date, article count) and a linked list of that day's articles.
 
-## Requirements
-
-- Python 3.9+
-- A free newsdata.io API key — sign up at <https://newsdata.io>
-- A Notion integration token + a parent page the integration can edit
-
-## Setup
-
-### 1. Install
+## Quick start
 
 ```bash
-git clone https://github.com/your-username/news-notion-sync.git
+git clone https://github.com/<you>/news-notion-sync.git
 cd news-notion-sync
-python -m venv .venv && source .venv/bin/activate   # optional but recommended
+
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 2. Get your newsdata.io key
-
-Create a free account at <https://newsdata.io> and copy your API key from the
-dashboard. The key is **never hardcoded** — it is read from the
-`NEWSDATA_API_KEY` environment variable.
-
-### 3. Create a Notion integration
-
-1. Go to <https://www.notion.so/my-integrations> and create a new integration.
-2. Copy the **Internal Integration Secret** → this is your `NOTION_API_KEY`.
-3. Open (or create) a Notion page that will hold your news, click the `•••`
-   menu → **Connections** → add your integration so it can edit the page.
-4. Copy that page's ID from its URL (the 32-character hex string) →
-   `NOTION_PARENT_PAGE_ID`.
-
-### 4. Configure environment variables
-
-Copy the example file and fill it in:
-
-```bash
-cp .env.example .env
-```
-
-Or export them directly in your shell:
-
-```bash
-export NEWSDATA_API_KEY="your_newsdata_key"
-export NOTION_API_KEY="secret_your_notion_token"
-export NOTION_PARENT_PAGE_ID="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-```
-
-## Configuration
-
-| Variable                | Required | Default                    | Description |
-|-------------------------|----------|----------------------------|-------------|
-| `NEWSDATA_API_KEY`      | ✅       | —                          | Your free newsdata.io key |
-| `NOTION_API_KEY`        | ✅       | —                          | Notion integration secret |
-| `NOTION_PARENT_PAGE_ID` | ✅*      | —                          | Page used to create the database + category pages |
-| `NOTION_DATABASE_ID`    | ⬜       | —                          | Reuse an existing database instead of creating one |
-| `NEWS_CATEGORIES`       | ⬜       | `top,technology,business`  | Comma-separated categories |
-| `NEWS_LANGUAGE`         | ⬜       | `en`                       | Language code |
-| `NEWS_COUNTRY`          | ⬜       | —                          | Country code, e.g. `us` |
-| `MAX_ARTICLES`          | ⬜       | `8`                        | Max articles per category |
-
-\* `NOTION_PARENT_PAGE_ID` is required the first time (to create the database). On
-later runs you can set `NOTION_DATABASE_ID` to reuse the database — though the
-parent page is still needed for per-category pages.
-
-## Usage
-
-```bash
+cp .env.example .env   # then fill in your keys
 python main.py
 ```
 
-Useful flags:
+You need two free credentials:
 
-```bash
-python main.py --categories "top,sports,science"   # override categories
-python main.py --max 5                              # fewer articles per category
-python main.py --no-pages                           # database only, skip pages
-```
+- a **newsdata.io API key** — sign up at <https://newsdata.io>, and
+- a **Notion integration token** — create one at
+  <https://www.notion.so/my-integrations>, then share a parent page with the
+  integration so it can create the database and pages.
 
-On first run you'll see the new database ID printed — save it as
-`NOTION_DATABASE_ID` to reuse the same database afterwards.
+## Configuration
 
-## Scheduling a daily sync
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `NEWSDATA_API_KEY` | yes | — | Free newsdata.io API key. |
+| `NOTION_API_KEY` | yes | — | Notion integration secret. |
+| `NOTION_PARENT_PAGE_ID` | first run | — | Page the integration can edit. |
+| `NOTION_DATABASE_ID` | no | — | Reuse an existing database instead of creating one. |
+| `NEWS_CATEGORIES` | no | `top,technology,business` | Comma-separated categories. |
+| `NEWS_LANGUAGE` | no | `en` | Language code. |
+| `NEWS_COUNTRY` | no | — | Optional country filter. |
+| `MAX_ARTICLES` | no | `8` | Max articles fetched per category. |
 
-Run it once a day with cron (adjust the path and time):
+## Automated daily sync (GitHub Actions)
+
+The workflow in [`.github/workflows/daily-sync.yml`](.github/workflows/daily-sync.yml)
+runs `python main.py` every day at **07:00 UTC** (`cron: '0 7 * * *'`), and can also
+be started by hand from the **Actions** tab via *Run workflow*.
+
+Set the credentials it reads under **Settings → Secrets and variables → Actions → New repository secret**.
+Create one secret each for `NEWSDATA_API_KEY`, `NOTION_API_KEY`, and `NOTION_PARENT_PAGE_ID` (add the optional `NOTION_DATABASE_ID` to reuse a database).
+After saving them, trigger a manual run from the **Actions** tab to confirm the schedule will work — secrets are never printed in the logs.
+
+Optional tuning values (`NEWS_CATEGORIES`, `NEWS_LANGUAGE`, `NEWS_COUNTRY`,
+`MAX_ARTICLES`) are read from **repository variables** on the same settings page,
+so they stay readable in the run logs.
+
+### Running it with cron instead
+
+Prefer your own machine? A plain crontab entry works the same way:
 
 ```cron
-0 8 * * *  cd /path/to/news-notion-sync && /path/to/.venv/bin/python main.py >> sync.log 2>&1
+0 7 * * * cd /path/to/news-notion-sync && .venv/bin/python main.py >> sync.log 2>&1
 ```
 
-## Free tier vs. paid
+## Free-tier notes
 
-Everything in this project works on the newsdata.io **free plan**. The following
-newsdata.io capabilities require a **paid plan** and are intentionally **not**
-used here:
-
-- `sentiment` / sentiment analysis
-- AI fields: `ai_tag`, `ai_region`, `ai_org`, `ai_summary`
-- the historical `/archive` endpoint and long date ranges
-- advanced full-text query operators
-
-If newsdata.io rejects a request because a parameter needs a paid plan (HTTP
-403/422), the script reports it clearly and continues with the next category
-instead of crashing.
-
-## Project layout
-
-```
-main.py             # orchestrates the sync
-newsdata_client.py  # thin newsdata.io /news client (free-tier safe)
-notion_sync.py      # minimal Notion API helper
-requirements.txt
-.env.example
-```
+Only free-tier endpoints and parameters are used. Paid-only features (sentiment,
+`ai_*` fields, `/archive`, advanced query operators) are intentionally left out,
+and the client degrades gracefully if the API returns a rate-limit or
+permission error.
 
 ## License
 
-MIT — use it, fork it, ship it.
+MIT
